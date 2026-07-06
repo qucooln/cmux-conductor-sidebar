@@ -23,7 +23,7 @@ A [Conductor](https://conductor.build)-style custom sidebar for [cmux](https://c
 ## Install
 
 ```bash
-git clone https://github.com/<you>/cmux-conductor-sidebar.git
+git clone https://github.com/qucooln/cmux-conductor-sidebar.git
 cd cmux-conductor-sidebar
 bash install.sh
 ```
