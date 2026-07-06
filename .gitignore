@@ -3,3 +3,4 @@
 *.bak.*
 conductor-backup-*/
 session/
+__pycache__/
