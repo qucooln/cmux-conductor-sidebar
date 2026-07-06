@@ -2,7 +2,7 @@
 
 A [Conductor](https://conductor.build)-style custom sidebar for [cmux](https://cmux.com), with **live per-tab agent status** — see at a glance which Claude Code / trae session is running, waiting for input, or done.
 
-![sidebar](docs/sidebar.png)
+![Live agent status for cmux](docs/banner.png)
 
 ## Features
 
