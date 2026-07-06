@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-# Conductor Sidebar 安装包 —— 配置合并/移除
-# 用法: merge.py <install|uninstall>
-# 幂等处理三处配置：Claude settings.json、trae hooks.json、cmux.json。
+# Conductor Sidebar package — config merge / removal
+# Usage: merge.py <install|uninstall>
+# Idempotently edits three configs: Claude settings.json, trae hooks.json, cmux.json.
 import json, os, re, sys
 
 HOME = os.path.expanduser("~")
 DIR = f"{HOME}/.config/cmux/conductor-sidebar"
 STATUS = f"{DIR}/cmux-status.sh"
 RENAME = f"{DIR}/cmux-rename-hook.sh"
-MARK = "conductor-sidebar/cmux-status.sh"          # 幂等/移除识别标记
+MARK = "conductor-sidebar/cmux-status.sh"          # idempotency / removal marker
 
 MODE = sys.argv[1] if len(sys.argv) > 1 else "install"
 
-# 每个 agent 的 hook 事件 -> (状态参数, matcher)
+# Per-agent hook events -> (status argument, matcher)
 CLAUDE_HOOKS = [
     ("UserPromptSubmit", "running", None),
     ("PreToolUse",       "running", "Bash|Task"),
@@ -31,16 +31,18 @@ TRAE_HOOKS = [
 
 def load_jsonc(p):
     raw = open(p).read()
-    raw = re.sub(r'^\s*//.*$', '', raw, flags=re.M)   # 整行注释
-    raw = re.sub(r',(\s*[}\]])', r'\1', raw)          # 尾逗号
+    raw = re.sub(r'^\s*//.*$', '', raw, flags=re.M)   # whole-line comments
+    raw = re.sub(r',(\s*[}\]])', r'\1', raw)          # trailing commas
     return json.loads(raw)
 
-# 这些事件同步执行：回合末/低频，必须可靠触发。
-# （async 的 Stop 经常来不及 spawn 就被丢，导致 running 永不清、spinner 一直转。）
+# These events run synchronously: end-of-turn / low-frequency, must fire reliably.
+# (An async Stop often gets dropped before it can spawn, leaving "running"
+# never cleared and the spinner stuck.)
 SYNC_EVENTS = {"Stop", "Notification", "SessionEnd"}
 
 def hook_cmd(arg, timeout=True, is_async=True):
-    # 高频事件 async（不阻塞工具调用）；回合末/低频事件同步（确保执行）
+    # High-frequency events are async (don't block tool calls);
+    # end-of-turn / low-frequency events are sync (guaranteed to run).
     e = {"type": "command", "command": f'bash "{STATUS}" {arg}'}
     if timeout: e["timeout"] = 5
     if is_async: e["async"] = True
@@ -77,37 +79,39 @@ def strip_hooks(hlist):
 
 def process_agent(path, spec, timeout, loader):
     if not os.path.exists(path):
-        return f"  skip {path}（不存在）"
+        return f"  skip {path} (not found)"
     try:
         data = loader(path)
     except Exception as e:
-        # 解析失败必须整体失败退出（而不是继续写别的文件），
-        # 让 install.sh 捕获后指引用户回滚，避免半装状态。
-        print(f"✗ 解析 {path} 失败：{e}", file=sys.stderr)
+        # A parse failure must fail the whole run (instead of moving on to the
+        # other files) so install.sh can catch it and point at the backup —
+        # never leave a half-installed state.
+        print(f"✗ Failed to parse {path}: {e}", file=sys.stderr)
         sys.exit(1)
     hlist = data.setdefault("hooks", {})
-    # install 也先 strip：清掉本包旧版留下的挂载（比如旧的 Stop->ready），再装新的，
-    # 这样"重跑 install = 安全更新"，不会残留旧参数。
+    # install strips first too: removes mounts left by older versions of this
+    # package (e.g. an old Stop->ready) before adding the new ones, so
+    # "re-run install" is a safe update with no stale arguments left behind.
     strip_hooks(hlist)
     if MODE == "install":
         add_hooks(hlist, spec, timeout)
     data.setdefault("version", data.get("version", 1)) if "trae" in path else None
     with open(path, "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
-    return f"  {'合并' if MODE=='install' else '移除'} hooks -> {path}"
+    return f"  {'merged' if MODE=='install' else 'removed'} hooks -> {path}"
 
 def process_cmux():
     p = f"{HOME}/.config/cmux/cmux.json"
     if not os.path.exists(p):
         if MODE == "uninstall":
-            return "  skip cmux.json（不存在）"
+            return "  skip cmux.json (not found)"
         data = {"$schema": "https://raw.githubusercontent.com/manaflow-ai/cmux/main/web/data/cmux.schema.json",
                 "schemaVersion": 1}
     else:
         try:
             data = load_jsonc(p)
         except Exception as e:
-            return f"  ⚠ cmux.json 解析失败，已跳过（请手动加 reorderOnNotification/notifications.hooks）：{e}"
+            return f"  ⚠ Failed to parse cmux.json, skipped (add reorderOnNotification/notifications.hooks manually): {e}"
     if MODE == "install":
         data.setdefault("app", {})["reorderOnNotification"] = False
         nh = data.setdefault("notifications", {}).setdefault("hooks", [])
@@ -131,15 +135,17 @@ def process_cmux():
                 del data["notifications"]
     with open(p, "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
-    return f"  {'合并' if MODE=='install' else '移除'} 配置 -> {p}"
+    return f"  {'merged' if MODE=='install' else 'removed'} config -> {p}"
 
 if __name__ == "__main__":
     if MODE not in ("install", "uninstall"):
-        # 未知参数绝不能落进 uninstall 分支（strip 不 add = 静默卸载）
-        print(f"用法: merge.py <install|uninstall>（收到: {MODE!r}）", file=sys.stderr)
+        # An unknown argument must never fall through to the uninstall branch
+        # (strip without add = silent hook removal).
+        print(f"usage: merge.py <install|uninstall> (got: {MODE!r})", file=sys.stderr)
         sys.exit(2)
-    # 三处都用 JSONC 容错解析（注释/尾逗号）：用户手编的配置常有这类写法，
-    # 严格 json.load 会在这里炸掉导致半装。
+    # All three configs use JSONC-tolerant parsing (comments / trailing
+    # commas): hand-edited configs often contain these, and a strict
+    # json.load would blow up mid-install.
     print(process_agent(f"{HOME}/.claude/settings.json", CLAUDE_HOOKS, True, load_jsonc))
     print(process_agent(f"{HOME}/.trae/hooks.json", TRAE_HOOKS, False, load_jsonc))
     print(process_cmux())

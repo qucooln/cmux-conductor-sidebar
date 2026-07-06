@@ -1,19 +1,23 @@
 #!/bin/bash
-# conductor sidebar 的通知 hook（由 notifications.hooks 调用）。
-# 拦截两种内部"魔法通知"并吞掉它们本身，其余通知原样放行：
-#   cmux-rename  -> 弹 macOS 输入框重命名 workspace（body=workspace-id）
-#   cmux-seen    -> 点开某 tab，清除它的"完成待查"红点（body=surface-id）
-# 说明：socket 授权基于进程祖先链，故输出 policy 后关 stdout 继续驻留，作为子进程的授权锚点。
+# Notification hook for the conductor sidebar (called via notifications.hooks).
+# Intercepts two internal "magic notifications" and swallows them; every other
+# notification passes through unchanged:
+#   cmux-rename  -> show a macOS input dialog to rename a workspace (body=workspace-id)
+#   cmux-seen    -> a tab was opened; clear its "finished, needs review" red dot (body=surface-id)
+# Note: socket authorization is based on the process ancestry chain, so we
+# print the policy, close stdout, and stay resident as the authorization
+# anchor for our child process.
 
 INPUT=$(cat)
 CMUX="${CMUX_BUNDLED_CLI_PATH:-/Applications/cmux.app/Contents/Resources/bin/cmux}"
 
-# 定位 cmux-status.sh（本机在 ~/.claude/hooks；安装包在与本脚本同目录）
+# Locate cmux-status.sh (package installs it next to this script; also check
+# legacy locations)
 STATUS="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/cmux-status.sh"
 [ -x "$STATUS" ] || STATUS="$HOME/.claude/hooks/cmux-status.sh"
 [ -x "$STATUS" ] || STATUS="$HOME/.config/cmux/conductor-sidebar/cmux-status.sh"
 
-swallow() {  # 吞掉当前通知：把所有 effects 关掉
+swallow() {  # swallow the current notification: turn off all its effects
   printf '%s' "$INPUT" | /usr/bin/python3 -c '
 import json,sys
 d=json.load(sys.stdin)
@@ -27,7 +31,7 @@ case "$CMUX_NOTIFICATION_TITLE" in
     (
       CUR=$("$CMUX" workspace list --id-format both 2>/dev/null | grep -F "$WS" | sed -E 's/^[* ]+workspace:[0-9]+ [0-9A-Fa-f-]{36} +//; s/ +\[selected\].*$//' | head -1)
       NAME=$(osascript -e "tell application id \"com.cmuxterm.app\" to activate" \
-                       -e "text returned of (display dialog \"输入新名称：\" default answer \"$CUR\" with title \"重命名 Workspace\")" 2>/dev/null)
+                       -e "text returned of (display dialog \"New name:\" default answer \"$CUR\" with title \"Rename Workspace\")" 2>/dev/null)
       [ -n "$NAME" ] && "$CMUX" workspace rename --workspace "$WS" --title "$NAME"
     ) &
     CHILD=$!

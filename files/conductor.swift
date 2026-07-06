@@ -2,7 +2,7 @@ func statusColor(_ label: String) -> String {
     return label == "RUNNING" ? "#60a5fa" : (label == "WAITING" ? "#fb923c" : "#4ade80")
 }
 
-// 侧栏自绘 spinner（clock 驱动，失焦也会转）
+// Self-drawn spinner (clock-driven, keeps spinning while unfocused)
 func spinner(_ sec: Int) -> String {
     let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     return frames[sec % 10]
@@ -61,14 +61,14 @@ VStack(alignment: .leading, spacing: 0) {
                     .padding(4)
                     .onTapGesture { cmux("workspace.select", workspace_id: w.id) }
                     .contextMenu {
-                        Button("重命名…") { cmux("notification.create_for_caller", title: "cmux-rename", body: w.id) }
-                        Button("置顶") { cmux("workspace.action", action: "move_top", workspace_id: w.id) }
-                        Button("上移") { cmux("workspace.action", action: "move_up", workspace_id: w.id) }
-                        Button("下移") { cmux("workspace.action", action: "move_down", workspace_id: w.id) }
-                        Button(w.pinned ? "取消 Pin" : "Pin") { cmux("workspace.action", action: w.pinned ? "unpin" : "pin", workspace_id: w.id) }
-                        Button("标为已读") { cmux("workspace.action", action: "mark_read", workspace_id: w.id) }
-                        Button("新建 Tab") { cmux("surface.create", workspace_id: w.id, focus: true) }
-                        Button("关闭 Workspace") { cmux("workspace.close", workspace_id: w.id) }
+                        Button("Rename…") { cmux("notification.create_for_caller", title: "cmux-rename", body: w.id) }
+                        Button("Move to Top") { cmux("workspace.action", action: "move_top", workspace_id: w.id) }
+                        Button("Move Up") { cmux("workspace.action", action: "move_up", workspace_id: w.id) }
+                        Button("Move Down") { cmux("workspace.action", action: "move_down", workspace_id: w.id) }
+                        Button(w.pinned ? "Unpin" : "Pin") { cmux("workspace.action", action: w.pinned ? "unpin" : "pin", workspace_id: w.id) }
+                        Button("Mark as Read") { cmux("workspace.action", action: "mark_read", workspace_id: w.id) }
+                        Button("New Tab") { cmux("surface.create", workspace_id: w.id, focus: true) }
+                        Button("Close Workspace") { cmux("workspace.close", workspace_id: w.id) }
                     }
                     ForEach(w.tabs.prefix(12)) { t in
                         HStack(spacing: 6) {

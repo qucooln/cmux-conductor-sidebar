@@ -1,15 +1,18 @@
 #!/bin/bash
-# cmux 工作区状态同步（由 Claude Code / trae 的 hooks 调用）
-# 用法: cmux-status.sh <running|waiting|ready|done|clear|seen <surface-id>>
+# cmux workspace status sync (called from Claude Code / trae hooks)
+# Usage: cmux-status.sh <running|waiting|ready|done|clear|seen <surface-id>>
 #
-# 状态：running(跑中) / waiting(等输入) / done(刚完成待查) / ready(空闲·已看) / clear(退出)
-# 聚合优先级：任一 running -> RUNNING；否则任一 waiting -> WAITING；否则 READY。
+# States: running / waiting (needs input) / done (finished, unseen) /
+#         ready (idle, seen) / clear (session exited)
+# Aggregation priority: any running -> RUNNING; else any waiting -> WAITING; else READY.
 # progress.label = "<AGG> run:<uuid> ... done:<uuid> ..."
-#   run:  -> 侧栏画动画 spinner；done: -> 侧栏画红点(完成待查)。
-# seen <sid>：把某 surface 的 done 清成 ready（已看，红点消失）——由侧栏点开 tab 时触发。
+#   run:  -> sidebar draws an animated spinner; done: -> sidebar draws a red
+#   "finished, needs review" dot.
+# seen <sid>: flip a surface's done to ready (seen — red dot disappears);
+#   triggered when the sidebar opens that tab.
 #
-# 兜底：running 超过 STALE_SECS 没刷新视为已停(Ctrl+C 中断等)，降级为 done(仍提示一下)。
-# 回滚：~/.config/cmux/rollback-20260703.sh
+# Safety net: a running entry not refreshed for STALE_SECS is treated as
+# stopped (Ctrl+C etc.) and downgraded to done (still surfaces a dot).
 
 CMUX="${CMUX_CLAUDE_HOOK_CMUX_BIN:-/Applications/cmux.app/Contents/Resources/bin/cmux}"
 [ -x "$CMUX" ] || CMUX="$(command -v cmux)" || exit 0
@@ -18,7 +21,7 @@ ROOT="$HOME/.cache/cmux-status"
 STALE_SECS=180
 SWEEP_EVERY=60
 
-# 聚合某 workspace 并推送（$1 = workspace uuid）
+# Aggregate one workspace and push ($1 = workspace uuid)
 push_ws() {
   local ws="$1" dir="$ROOT/$1" agg="" ids="" f v L C I
   for f in "$dir"/*; do
@@ -49,12 +52,14 @@ push_ws() {
     esac
   done
   ids="${ids# }"
-  # 分隔符用空格(ASCII)；cmux 对多字节字符(如 §)有 bug 会吞前缀。
+  # Separator is a plain ASCII space; cmux has a bug with multi-byte
+  # characters (e.g. §) that swallows the prefix.
   "$CMUX" set-progress 1.0 --label "$L $ids" --workspace "$ws" 2>/dev/null
   "$CMUX" set-status claude "$L" --workspace "$ws" --icon "$I" --color "$C" --priority 1 2>/dev/null
 }
 
-# 特殊：seen <sid> —— 点开 tab，把它的 done 清成 ready，红点消失（遍历各 workspace 找）
+# Special case: seen <sid> — a tab was opened; flip its done to ready so the
+# red dot disappears (search across all workspaces).
 if [ "$1" = "seen" ]; then
   target="$2"
   [ -n "$target" ] || exit 0
@@ -69,16 +74,19 @@ if [ "$1" = "seen" ]; then
   exit 0
 fi
 
-# 以下是正常状态事件，需要 workspace 上下文（seen 不需要，已在上面处理并退出）
+# Regular status events below need workspace context (seen doesn't — handled
+# and exited above).
 [ -n "$CMUX_WORKSPACE_ID" ] || exit 0
 WS="$CMUX_WORKSPACE_ID"
 SF="${CMUX_SURFACE_ID:-$WS}"
 DIR="$ROOT/$WS"
 mkdir -p "$DIR"
 
-# 1) 记录本会话状态
-# ready 特殊：若这个 surface 刚才还是 running（说明是"跑完了"），升级为 done（完成待查红点）。
-# 这样不依赖 Stop 挂载参数是 ready 还是 done，新旧会话都能出红点。
+# 1) Record this session's state.
+# ready is special: if this surface was just running (i.e. it "finished"),
+# upgrade to done (finished-needs-review red dot). This way we don't depend
+# on whether the Stop hook was mounted with ready or done — both old and new
+# sessions produce the dot.
 case "$1" in
   running|waiting|done) printf '%s' "$1" > "$DIR/$SF" ;;
   ready)
@@ -91,7 +99,8 @@ case "$1" in
   *)     exit 0 ;;
 esac
 
-# 2) 清理已关闭 surface 的残留（跑 cmux tree 较重，只在低频事件做）
+# 2) Clean up leftovers from closed surfaces (cmux tree is relatively heavy,
+# so only do this on low-frequency events).
 case "$1" in
   ready|done|clear)
     LIVE="$("$CMUX" tree --id-format both 2>/dev/null \
@@ -105,10 +114,10 @@ case "$1" in
     fi ;;
 esac
 
-# 3) 推送自己 workspace
+# 3) Push this workspace.
 push_ws "$WS"
 
-# 4) 全局兜底：stale running 视为已停 -> done（限流）
+# 4) Global safety net: stale running means it stopped -> done (rate-limited).
 now="$(date +%s)"
 stamp="$ROOT/.last-sweep"
 last="$(cat "$stamp" 2>/dev/null || echo 0)"
