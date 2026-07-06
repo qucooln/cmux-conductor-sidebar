@@ -29,10 +29,6 @@ TRAE_HOOKS = [
     ("Notification",     "waiting", None),
 ]
 
-def load_json(p):
-    with open(p) as f:
-        return json.load(f)
-
 def load_jsonc(p):
     raw = open(p).read()
     raw = re.sub(r'^\s*//.*$', '', raw, flags=re.M)   # 整行注释
@@ -82,7 +78,13 @@ def strip_hooks(hlist):
 def process_agent(path, spec, timeout, loader):
     if not os.path.exists(path):
         return f"  skip {path}（不存在）"
-    data = loader(path)
+    try:
+        data = loader(path)
+    except Exception as e:
+        # 解析失败必须整体失败退出（而不是继续写别的文件），
+        # 让 install.sh 捕获后指引用户回滚，避免半装状态。
+        print(f"✗ 解析 {path} 失败：{e}", file=sys.stderr)
+        sys.exit(1)
     hlist = data.setdefault("hooks", {})
     # install 也先 strip：清掉本包旧版留下的挂载（比如旧的 Stop->ready），再装新的，
     # 这样"重跑 install = 安全更新"，不会残留旧参数。
@@ -131,6 +133,13 @@ def process_cmux():
         json.dump(data, f, indent=2, ensure_ascii=False)
     return f"  {'合并' if MODE=='install' else '移除'} 配置 -> {p}"
 
-print(process_agent(f"{HOME}/.claude/settings.json", CLAUDE_HOOKS, True, load_json))
-print(process_agent(f"{HOME}/.trae/hooks.json", TRAE_HOOKS, False, load_json))
-print(process_cmux())
+if __name__ == "__main__":
+    if MODE not in ("install", "uninstall"):
+        # 未知参数绝不能落进 uninstall 分支（strip 不 add = 静默卸载）
+        print(f"用法: merge.py <install|uninstall>（收到: {MODE!r}）", file=sys.stderr)
+        sys.exit(2)
+    # 三处都用 JSONC 容错解析（注释/尾逗号）：用户手编的配置常有这类写法，
+    # 严格 json.load 会在这里炸掉导致半装。
+    print(process_agent(f"{HOME}/.claude/settings.json", CLAUDE_HOOKS, True, load_jsonc))
+    print(process_agent(f"{HOME}/.trae/hooks.json", TRAE_HOOKS, False, load_jsonc))
+    print(process_cmux())
