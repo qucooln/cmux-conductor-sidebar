@@ -100,6 +100,28 @@ arm_watchdog() {
   ( trap '' HUP; sleep "$STALE_SECS"; rm -f "$lock"; run_sweep ) >/dev/null 2>&1 &
 }
 
+# Fix C: display reconciler. Pushes are non-atomic and the `running` hooks are
+# async, so a stale `running` set-progress can land AFTER a later `ready` push,
+# leaving cmux stuck showing a spinner while the cache already says ready. Once a
+# workspace's events go quiet (~SETTLE_SECS), re-push its label from the settled
+# cache so the display converges — no need to click the tab to unstick it.
+# One watcher per workspace; each event just refreshes the activity marker.
+SETTLE_SECS=3
+reconcile_ws() {
+  local ws="$1" mark="$ROOT/$ws/.reconcile" guard="$ROOT/$ws/.reconcile.lock" mt now
+  : > "$mark"                                   # mark "activity now"
+  mkdir "$guard" 2>/dev/null || return          # a watcher is already running
+  ( trap '' HUP
+    while :; do
+      sleep "$SETTLE_SECS"
+      mt="$(stat -f %m "$mark" 2>/dev/null || echo 0)"; now="$(date +%s)"
+      [ $((now - mt)) -ge "$SETTLE_SECS" ] && break   # quiet → settled
+    done
+    push_ws "$ws"                               # re-push the settled cache state
+    rmdir "$guard" 2>/dev/null
+  ) >/dev/null 2>&1 &
+}
+
 # Special case: seen <sid> — a tab was opened; flip its done to ready so the
 # red dot disappears (search across all workspaces).
 if [ "$1" = "seen" ]; then
@@ -169,6 +191,10 @@ esac
 
 # 3) Push this workspace.
 push_ws "$WS"
+
+# 3b) Arm the display reconciler (Fix C) so a stale spinner from an out-of-order
+# push clears itself a few seconds after activity settles.
+reconcile_ws "$WS"
 
 # 4a) Arm the self-healing watchdog (Fix A) so a stuck running clears itself.
 arm_watchdog
