@@ -43,6 +43,19 @@ cmux's custom-sidebar DSL can only read cmux's built-in data, which has **no per
 
 A 3-minute watchdog also downgrades any `running` that stops refreshing (e.g. a session killed without a `Stop`), so nothing gets stuck spinning.
 
+## Speed mode
+
+cmux can feel ~10x slower than its own terminal engine when an agent streams a lot of output. The cause isn't rendering — it's that cmux floods its main thread on **every terminal-title-change escape**, and Claude Code updates the title constantly while it works (see [cmux #4681](https://github.com/manaflow-ai/cmux/issues/4681)). A quick benchmark on the same machine: 30k lines of output with frequent title changes took **2.1s in cmux vs 0.2s in iTerm2**; with the title flood removed, cmux drops to **0.2s** — identical to iTerm2.
+
+So speed mode (on by default) does two things:
+
+1. Sets `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` in your `settings.json` `env`, so Claude Code stops streaming title escapes. This is **surgical** — other programs (vim/ssh/shell) keep setting their titles normally; only Claude Code's flood stops.
+2. Registers `cmux-tabname.sh` (a `UserPromptSubmit` hook) to name each tab from your prompt **once per turn** — so tabs stay meaningfully labeled without the flood.
+
+The env var takes effect on the **next** Claude Code session. To opt out, install with `CONDUCTOR_SPEED=0 bash install.sh` (keeps the status sidebar, skips the title change).
+
+> Alternative: if the env var doesn't work on your Claude Code version, you can instead lock the title at the terminal with a **non-empty** value in `~/.config/ghostty/config` — `title = cmux` (a blank `title = " "` does *not* lock). That's global to cmux (all tabs stop auto-titling), so the env var is preferred.
+
 ## Uninstall
 
 ```bash
@@ -58,6 +71,7 @@ Precisely removes only what this package added (hooks, files, config keys). Your
 | `files/conductor.swift` | the sidebar UI (cmux custom-sidebar DSL) |
 | `files/cmux-status.sh` | per-session status reporting + workspace aggregation |
 | `files/cmux-rename-hook.sh` | rename dialog + "seen" red-dot clear (notification hook) |
+| `files/cmux-tabname.sh` | speed mode: name each tab from the prompt, once per turn |
 | `install.sh` / `uninstall.sh` | orchestration (backup → files → config merge → activate) |
 | `merge.py` | idempotent merge/removal for settings.json / trae hooks / cmux.json |
 

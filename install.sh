@@ -39,9 +39,19 @@ echo "==> 2/5 Installing scripts and sidebar files"
 mkdir -p "$DEST" "$SIDEBARS"
 install -m 0755 "$FILES/cmux-status.sh"       "$DEST/cmux-status.sh"
 install -m 0755 "$FILES/cmux-rename-hook.sh"  "$DEST/cmux-rename-hook.sh"
+install -m 0755 "$FILES/cmux-tabname.sh"      "$DEST/cmux-tabname.sh"
 install -m 0644 "$FILES/conductor.swift"      "$SIDEBARS/conductor.swift"
-echo "   -> $DEST/{cmux-status.sh,cmux-rename-hook.sh}"
+echo "   -> $DEST/{cmux-status.sh,cmux-rename-hook.sh,cmux-tabname.sh}"
 echo "   -> $SIDEBARS/conductor.swift"
+
+# Speed mode (default on; set CONDUCTOR_SPEED=0 to skip) is applied by merge.py:
+# it sets CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 so Claude Code stops streaming
+# terminal-title escapes — those floods make cmux ~10x slower than its own engine
+# (cmux #4681). cmux-tabname.sh then names each tab once per turn instead. This is
+# surgical: other programs (vim/ssh/shell) keep their titles.
+if [ "${CONDUCTOR_SPEED:-1}" != "0" ]; then
+  echo "   speed mode: on (CC title updates disabled; takes effect on the next Claude Code session)"
+fi
 
 echo "==> 3/5 Merging hooks and cmux config (idempotent)"
 if ! python3 "$SCRIPT_DIR/merge.py" install; then

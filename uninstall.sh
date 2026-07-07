@@ -14,6 +14,24 @@ CMUX="${CMUX_BUNDLED_CLI_PATH:-}"
 echo "==> 1/4 Removing this package's entries from hooks / cmux config"
 python3 "$SCRIPT_DIR/merge.py" uninstall
 
+# Remove the speed-mode Ghostty title lock we added (identified by our marker).
+# Leaves a pre-existing user `title =` line alone (we never touch that case).
+GCFG="$HOME/.config/ghostty/config"
+if [ -f "$GCFG" ] && grep -q "conductor-sidebar speed mode" "$GCFG"; then
+  python3 - "$GCFG" <<'PY'
+import sys, re
+p=sys.argv[1]; out=[]; drop_next_title=False
+for ln in open(p).read().splitlines(keepends=True):
+    if "conductor-sidebar speed mode" in ln or "title-change floods (cmux #4681)" in ln:
+        drop_next_title=True; continue        # drop our comment lines
+    if drop_next_title and re.match(r'\s*title\s*=', ln):
+        drop_next_title=False; continue        # drop the title = line we added
+    out.append(ln)
+open(p,"w").write("".join(out))
+PY
+  echo "   removed speed-mode Ghostty title lock"
+fi
+
 echo "==> 2/4 Deleting installed files"
 rm -f "$HOME/.config/cmux/sidebars/conductor.swift"
 rm -rf "$HOME/.config/cmux/conductor-sidebar"

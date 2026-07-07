@@ -9,6 +9,9 @@ DIR = f"{HOME}/.config/cmux/conductor-sidebar"
 STATUS = f"{DIR}/cmux-status.sh"
 RENAME = f"{DIR}/cmux-rename-hook.sh"
 MARK = "conductor-sidebar/cmux-status.sh"          # idempotency / removal marker
+TABNAME = f"{DIR}/cmux-tabname.sh"
+STRIP_KEY = "conductor-sidebar/"                    # strips every hook this package added
+SPEED = os.environ.get("CONDUCTOR_SPEED", "1") != "0"   # speed mode on by default; CONDUCTOR_SPEED=0 opts out
 
 MODE = sys.argv[1] if len(sys.argv) > 1 else "install"
 
@@ -65,11 +68,23 @@ def add_hooks(hlist, spec, timeout):
             entry["matcher"] = matcher
         hlist.setdefault(ev, []).append(entry)
 
+# Speed mode: name the tab once per turn from the user's prompt (UserPromptSubmit).
+# Pairs with a locked Ghostty title, which stops the per-output title-change flood
+# that makes cmux slow (see cmux #4681). install.sh sets/unsets the title lock.
+def add_tabname(hlist):
+    ev = "UserPromptSubmit"
+    for e in hlist.get(ev, []):
+        for hk in e.get("hooks", []):
+            if "cmux-tabname.sh" in hk.get("command", ""):
+                return
+    hlist.setdefault(ev, []).append(
+        {"hooks": [{"type": "command", "command": f'bash "{TABNAME}"', "timeout": 5, "async": True}]})
+
 def strip_hooks(hlist):
     for ev in list(hlist.keys()):
         kept = []
         for e in hlist[ev]:
-            e["hooks"] = [hk for hk in e.get("hooks", []) if MARK not in hk.get("command", "")]
+            e["hooks"] = [hk for hk in e.get("hooks", []) if STRIP_KEY not in hk.get("command", "")]
             if e["hooks"]:
                 kept.append(e)
         if kept:
@@ -77,7 +92,9 @@ def strip_hooks(hlist):
         else:
             del hlist[ev]
 
-def process_agent(path, spec, timeout, loader):
+SPEED_ENV = "CLAUDE_CODE_DISABLE_TERMINAL_TITLE"   # stops CC's title flood (cmux #4681)
+
+def process_agent(path, spec, timeout, loader, speed=False, manage_env=False):
     if not os.path.exists(path):
         return f"  skip {path} (not found)"
     try:
@@ -95,6 +112,19 @@ def process_agent(path, spec, timeout, loader):
     strip_hooks(hlist)
     if MODE == "install":
         add_hooks(hlist, spec, timeout)
+        if speed:
+            add_tabname(hlist)
+    # Speed mode also disables Claude Code's own terminal-title updates via env,
+    # so cmux stops getting flooded (surgical — other programs keep their titles).
+    if manage_env:
+        if MODE == "install" and speed:
+            data.setdefault("env", {})[SPEED_ENV] = "1"
+        else:
+            env = data.get("env")
+            if isinstance(env, dict):
+                env.pop(SPEED_ENV, None)
+                if not env:
+                    data.pop("env", None)
     data.setdefault("version", data.get("version", 1)) if "trae" in path else None
     with open(path, "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
@@ -146,6 +176,6 @@ if __name__ == "__main__":
     # All three configs use JSONC-tolerant parsing (comments / trailing
     # commas): hand-edited configs often contain these, and a strict
     # json.load would blow up mid-install.
-    print(process_agent(f"{HOME}/.claude/settings.json", CLAUDE_HOOKS, True, load_jsonc))
+    print(process_agent(f"{HOME}/.claude/settings.json", CLAUDE_HOOKS, True, load_jsonc, speed=SPEED, manage_env=True))
     print(process_agent(f"{HOME}/.trae/hooks.json", TRAE_HOOKS, False, load_jsonc))
     print(process_cmux())
