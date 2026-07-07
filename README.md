@@ -47,12 +47,11 @@ A 3-minute watchdog also downgrades any `running` that stops refreshing (e.g. a 
 
 cmux can feel ~10x slower than its own terminal engine when an agent streams a lot of output. The cause isn't rendering — it's that cmux floods its main thread on **every terminal-title-change escape**, and Claude Code updates the title constantly while it works (see [cmux #4681](https://github.com/manaflow-ai/cmux/issues/4681)). A quick benchmark on the same machine: 30k lines of output with frequent title changes took **2.1s in cmux vs 0.2s in iTerm2**; with the title flood removed, cmux drops to **0.2s** — identical to iTerm2.
 
-So speed mode (on by default) does two things:
+Speed mode (on by default) sets `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` in your `settings.json` `env`, so Claude Code stops streaming title escapes. This is **surgical** — other programs (vim/ssh/shell) keep setting their titles normally; only Claude Code's flood stops. With titles no longer streamed, each tab keeps a **stable** name (its working directory, or whatever you set via right-click → Rename), instead of changing on every turn.
 
-1. Sets `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` in your `settings.json` `env`, so Claude Code stops streaming title escapes. This is **surgical** — other programs (vim/ssh/shell) keep setting their titles normally; only Claude Code's flood stops.
-2. Registers `cmux-tabname.sh` (a `UserPromptSubmit` hook) to name each tab from your prompt **once per turn** — so tabs stay meaningfully labeled without the flood.
+The env var takes effect on the **next** Claude Code session. To opt out, install with `CONDUCTOR_SPEED=0 bash install.sh`.
 
-The env var takes effect on the **next** Claude Code session. To opt out, install with `CONDUCTOR_SPEED=0 bash install.sh` (keeps the status sidebar, skips the title change).
+**Optional — per-turn tab naming.** If you'd rather have each tab auto-named from your latest prompt (like the old streamed titles, but throttled to once per turn), install with `CONDUCTOR_TABNAME=1 bash install.sh`. It's **off by default** because it overwrites the tab title every turn, which fights manual/stable names.
 
 > Alternative: if the env var doesn't work on your Claude Code version, you can instead lock the title at the terminal with a **non-empty** value in `~/.config/ghostty/config` — `title = cmux` (a blank `title = " "` does *not* lock). That's global to cmux (all tabs stop auto-titling), so the env var is preferred.
 

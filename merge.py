@@ -11,7 +11,8 @@ RENAME = f"{DIR}/cmux-rename-hook.sh"
 MARK = "conductor-sidebar/cmux-status.sh"          # idempotency / removal marker
 TABNAME = f"{DIR}/cmux-tabname.sh"
 STRIP_KEY = "conductor-sidebar/"                    # strips every hook this package added
-SPEED = os.environ.get("CONDUCTOR_SPEED", "1") != "0"   # speed mode on by default; CONDUCTOR_SPEED=0 opts out
+SPEED = os.environ.get("CONDUCTOR_SPEED", "1") != "0"   # speed mode (env var) on by default; CONDUCTOR_SPEED=0 opts out
+TABNAME = os.environ.get("CONDUCTOR_TABNAME") == "1"    # per-turn tab naming OFF by default (opt in; it overwrites titles each turn)
 
 MODE = sys.argv[1] if len(sys.argv) > 1 else "install"
 
@@ -94,7 +95,7 @@ def strip_hooks(hlist):
 
 SPEED_ENV = "CLAUDE_CODE_DISABLE_TERMINAL_TITLE"   # stops CC's title flood (cmux #4681)
 
-def process_agent(path, spec, timeout, loader, speed=False, manage_env=False):
+def process_agent(path, spec, timeout, loader, speed=False, tabname=False, manage_env=False):
     if not os.path.exists(path):
         return f"  skip {path} (not found)"
     try:
@@ -112,7 +113,7 @@ def process_agent(path, spec, timeout, loader, speed=False, manage_env=False):
     strip_hooks(hlist)
     if MODE == "install":
         add_hooks(hlist, spec, timeout)
-        if speed:
+        if tabname:
             add_tabname(hlist)
     # Speed mode also disables Claude Code's own terminal-title updates via env,
     # so cmux stops getting flooded (surgical — other programs keep their titles).
@@ -176,6 +177,6 @@ if __name__ == "__main__":
     # All three configs use JSONC-tolerant parsing (comments / trailing
     # commas): hand-edited configs often contain these, and a strict
     # json.load would blow up mid-install.
-    print(process_agent(f"{HOME}/.claude/settings.json", CLAUDE_HOOKS, True, load_jsonc, speed=SPEED, manage_env=True))
+    print(process_agent(f"{HOME}/.claude/settings.json", CLAUDE_HOOKS, True, load_jsonc, speed=SPEED, tabname=TABNAME, manage_env=True))
     print(process_agent(f"{HOME}/.trae/hooks.json", TRAE_HOOKS, False, load_jsonc))
     print(process_cmux())
