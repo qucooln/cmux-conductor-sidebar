@@ -108,7 +108,9 @@ arm_watchdog() {
 # One watcher per workspace; each event just refreshes the activity marker.
 SETTLE_SECS=3
 reconcile_ws() {
-  local ws="$1" mark="$ROOT/$ws/.reconcile" guard="$ROOT/$ws/.reconcile.lock" mt now
+  local ws="$1"                                 # NOTE: separate line — a same-line
+  local mark="$ROOT/$ws/.reconcile"             # `local ws=.. mark=$ROOT/$ws/..` would
+  local guard="$ROOT/$ws/.reconcile.lock" mt now # expand $ws before it's assigned (empty)
   : > "$mark"                                   # mark "activity now"
   mkdir "$guard" 2>/dev/null || return          # a watcher is already running
   ( trap '' HUP
