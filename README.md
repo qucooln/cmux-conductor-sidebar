@@ -71,6 +71,10 @@ Precisely removes only what this package added (hooks, files, config keys). Your
 
 MIT — see [LICENSE](LICENSE).
 
+## Disclaimer
+
+This is an independent, community-built project. It is **not affiliated with, endorsed by, or sponsored by** Conductor ([conductor.build](https://conductor.build)), [cmux](https://cmux.com), or Anthropic. "Conductor", "cmux", and "Claude" are trademarks of their respective owners; they are referenced here only to describe compatibility and design inspiration. All code and assets in this repository are original work by the author.
+
 ---
 
 Made for the cmux community. Questions & feedback welcome on the [cmux Discord](https://discord.gg/xsgFEVrWCZ).
