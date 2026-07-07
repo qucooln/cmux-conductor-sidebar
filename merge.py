@@ -12,7 +12,7 @@ MARK = "conductor-sidebar/cmux-status.sh"          # idempotency / removal marke
 TABNAME = f"{DIR}/cmux-tabname.sh"
 STRIP_KEY = "conductor-sidebar/"                    # strips every hook this package added
 SPEED = os.environ.get("CONDUCTOR_SPEED", "1") != "0"   # speed mode (env var) on by default; CONDUCTOR_SPEED=0 opts out
-TABNAME = os.environ.get("CONDUCTOR_TABNAME") == "1"    # per-turn tab naming OFF by default (opt in; it overwrites titles each turn)
+TABNAME_ON = os.environ.get("CONDUCTOR_TABNAME") == "1" # per-turn tab naming OFF by default (opt in; it overwrites titles each turn)
 
 MODE = sys.argv[1] if len(sys.argv) > 1 else "install"
 
@@ -177,6 +177,6 @@ if __name__ == "__main__":
     # All three configs use JSONC-tolerant parsing (comments / trailing
     # commas): hand-edited configs often contain these, and a strict
     # json.load would blow up mid-install.
-    print(process_agent(f"{HOME}/.claude/settings.json", CLAUDE_HOOKS, True, load_jsonc, speed=SPEED, tabname=TABNAME, manage_env=True))
+    print(process_agent(f"{HOME}/.claude/settings.json", CLAUDE_HOOKS, True, load_jsonc, speed=SPEED, tabname=TABNAME_ON, manage_env=True))
     print(process_agent(f"{HOME}/.trae/hooks.json", TRAE_HOOKS, False, load_jsonc))
     print(process_cmux())
