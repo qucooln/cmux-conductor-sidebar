@@ -11,15 +11,23 @@
 # seen <sid>: flip a surface's done to ready (seen — red dot disappears);
 #   triggered when the sidebar opens that tab.
 #
-# Safety net: a running entry not refreshed for STALE_SECS is treated as
-# stopped (Ctrl+C etc.) and downgraded to done (still surfaces a dot).
+# Safety net (A): a running entry not refreshed for STALE_SECS is treated as
+# stopped (Ctrl+C etc.) and downgraded to done. This runs both opportunistically
+# on any event AND via a self-scheduled wake, so a stuck spinner clears even
+# when this is the only active session (no other hook fires to trigger a sweep).
+#
+# Recap guard (B): some agent harnesses emit an automatic "recap" a few seconds
+# after a turn ends — a phantom turn that fires a `running` lifecycle event with
+# no matching Stop, which would restart the spinner forever. We ignore a
+# `running` that lands within RECAP_WINDOW of a just-finished state.
 
 CMUX="${CMUX_CLAUDE_HOOK_CMUX_BIN:-/Applications/cmux.app/Contents/Resources/bin/cmux}"
 [ -x "$CMUX" ] || CMUX="$(command -v cmux)" || exit 0
 
 ROOT="$HOME/.cache/cmux-status"
-STALE_SECS=180
-SWEEP_EVERY=60
+STALE_SECS=180       # a `running` older than this with no refresh = stopped
+SWEEP_EVERY=60       # opportunistic sweep rate-limit
+RECAP_WINDOW=15      # a `running` within this many secs of a finished state = recap phantom
 
 # Aggregate one workspace and push ($1 = workspace uuid)
 push_ws() {
@@ -58,6 +66,40 @@ push_ws() {
   "$CMUX" set-status claude "$L" --workspace "$ws" --icon "$I" --color "$C" --priority 1 2>/dev/null
 }
 
+# Downgrade every stale `running` across all workspaces to `done` and repush.
+run_sweep() {
+  local now wsdir f mt changed
+  now="$(date +%s)"
+  for wsdir in "$ROOT"/*/; do
+    [ -d "$wsdir" ] || continue
+    changed=0
+    for f in "$wsdir"*; do
+      [ -e "$f" ] || continue
+      [ "$(cat "$f" 2>/dev/null)" = "running" ] || continue
+      mt="$(stat -f %m "$f" 2>/dev/null || echo "$now")"
+      if [ $((now - mt)) -ge "$STALE_SECS" ]; then
+        printf 'done' > "$f"; changed=1
+      fi
+    done
+    [ "$changed" = 1 ] && push_ws "$(basename "$wsdir")"
+  done
+}
+
+# Fix A: self-scheduled watchdog. After a running push, arm a single detached
+# timer that runs a sweep STALE_SECS later — so a stuck `running` self-heals
+# without needing another session to fire an event. Coalesced via a lock file
+# to at most one pending wake at a time.
+arm_watchdog() {
+  local lock="$ROOT/.wake.lock" now mt
+  now="$(date +%s)"
+  if [ -e "$lock" ]; then
+    mt="$(stat -f %m "$lock" 2>/dev/null || echo 0)"
+    [ $((now - mt)) -lt "$STALE_SECS" ] && return   # a wake is already pending
+  fi
+  : > "$lock"
+  ( trap '' HUP; sleep "$STALE_SECS"; rm -f "$lock"; run_sweep ) >/dev/null 2>&1 &
+}
+
 # Special case: seen <sid> — a tab was opened; flip its done to ready so the
 # red dot disappears (search across all workspaces).
 if [ "$1" = "seen" ]; then
@@ -83,13 +125,24 @@ DIR="$ROOT/$WS"
 mkdir -p "$DIR"
 
 # 1) Record this session's state.
-# ready is special: if this surface was just running (i.e. it "finished"),
-# upgrade to done (finished-needs-review red dot). This way we don't depend
-# on whether the Stop hook was mounted with ready or done — both old and new
-# sessions produce the dot.
 case "$1" in
-  running|waiting|done) printf '%s' "$1" > "$DIR/$SF" ;;
+  running)
+    # Fix B: suppress the recap phantom. If this surface just finished
+    # (done/ready written within RECAP_WINDOW), a `running` arriving now is the
+    # auto-recap, not real work — keep the finished state so the spinner stays
+    # off. A genuine new turn arrives later (or re-asserts via a real tool call).
+    cur="$(cat "$DIR/$SF" 2>/dev/null)"
+    if [ "$cur" = "done" ] || [ "$cur" = "ready" ]; then
+      mt="$(stat -f %m "$DIR/$SF" 2>/dev/null || echo 0)"
+      [ $(( $(date +%s) - mt )) -lt "$RECAP_WINDOW" ] && exit 0
+    fi
+    printf 'running' > "$DIR/$SF" ;;
+  waiting|done) printf '%s' "$1" > "$DIR/$SF" ;;
   ready)
+    # ready is special: if this surface was just running (i.e. it "finished"),
+    # upgrade to done (finished-needs-review red dot). This way we don't depend
+    # on whether the Stop hook was mounted with ready or done — both old and new
+    # sessions produce the dot.
     if [ "$(cat "$DIR/$SF" 2>/dev/null)" = "running" ]; then
       printf 'done' > "$DIR/$SF"
     else
@@ -117,24 +170,16 @@ esac
 # 3) Push this workspace.
 push_ws "$WS"
 
-# 4) Global safety net: stale running means it stopped -> done (rate-limited).
+# 4a) Arm the self-healing watchdog (Fix A) so a stuck running clears itself.
+arm_watchdog
+
+# 4b) Opportunistic global sweep (rate-limited) — catches stale running from
+# other sessions whenever any event fires.
 now="$(date +%s)"
 stamp="$ROOT/.last-sweep"
 last="$(cat "$stamp" 2>/dev/null || echo 0)"
 if [ $((now - last)) -ge "$SWEEP_EVERY" ]; then
   printf '%s' "$now" > "$stamp"
-  for wsdir in "$ROOT"/*/; do
-    [ -d "$wsdir" ] || continue
-    changed=0
-    for f in "$wsdir"*; do
-      [ -e "$f" ] || continue
-      [ "$(cat "$f" 2>/dev/null)" = "running" ] || continue
-      mt="$(stat -f %m "$f" 2>/dev/null || echo "$now")"
-      if [ $((now - mt)) -ge "$STALE_SECS" ]; then
-        printf 'done' > "$f"; changed=1
-      fi
-    done
-    [ "$changed" = 1 ] && push_ws "$(basename "$wsdir")"
-  done
+  run_sweep
 fi
 exit 0
