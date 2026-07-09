@@ -161,6 +161,14 @@ case "$1" in
       [ $(( $(date +%s) - mt )) -lt "$RECAP_WINDOW" ] && exit 0
     fi
     printf 'running' > "$DIR/$SF" ;;
+  busy)
+    # Subagent lifecycle (SubagentStart/Stop). These keep the spinner alive
+    # DURING a turn — a long subagent run has no PreToolUse to refresh the
+    # watchdog — but must NEVER resurrect a finished session: a backgrounded
+    # subagent can Stop long after the main turn's Stop (seen 214s later). So
+    # only refresh running while already running; otherwise ignore.
+    [ "$(cat "$DIR/$SF" 2>/dev/null)" = "running" ] || exit 0
+    printf 'running' > "$DIR/$SF" ;;
   waiting)
     # WAITING = the agent is blocked mid-turn (permission / a question). Claude
     # Code also fires an idle-reminder notification ~60s AFTER a turn ends; that

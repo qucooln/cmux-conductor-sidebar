@@ -20,8 +20,8 @@ MODE = sys.argv[1] if len(sys.argv) > 1 else "install"
 CLAUDE_HOOKS = [
     ("UserPromptSubmit", "running", None),
     ("PreToolUse",       "running", "Bash|Task"),
-    ("SubagentStart",    "running", None),
-    ("SubagentStop",     "running", None),
+    ("SubagentStart",    "busy",    None),
+    ("SubagentStop",     "busy",    None),
     ("Notification",     "waiting", None),
     ("Stop",             "ready",   None),
     ("SessionEnd",       "clear",   None),
