@@ -161,7 +161,14 @@ case "$1" in
       [ $(( $(date +%s) - mt )) -lt "$RECAP_WINDOW" ] && exit 0
     fi
     printf 'running' > "$DIR/$SF" ;;
-  waiting|done) printf '%s' "$1" > "$DIR/$SF" ;;
+  waiting)
+    # WAITING = the agent is blocked mid-turn (permission / a question). Claude
+    # Code also fires an idle-reminder notification ~60s AFTER a turn ends; that
+    # must not flip a finished session to WAITING. So only honor waiting while the
+    # surface is still running; otherwise it's the idle reminder — leave done/ready.
+    [ "$(cat "$DIR/$SF" 2>/dev/null)" = "running" ] || exit 0
+    printf 'waiting' > "$DIR/$SF" ;;
+  done) printf 'done' > "$DIR/$SF" ;;
   ready)
     # ready is special: if this surface was just running (i.e. it "finished"),
     # upgrade to done (finished-needs-review red dot). This way we don't depend
