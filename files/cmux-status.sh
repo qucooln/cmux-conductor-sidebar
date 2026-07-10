@@ -148,6 +148,19 @@ SF="${CMUX_SURFACE_ID:-$WS}"
 DIR="$ROOT/$WS"
 mkdir -p "$DIR"
 
+# For end-of-turn / cleanup events, read the live tree once: reused below to
+# prune dead surfaces AND to tell whether this surface is the one you're viewing.
+TREE=""; LIVE=""; ACTIVE_SF=""
+case "$1" in
+  ready|done|clear)
+    TREE="$("$CMUX" tree --id-format both 2>/dev/null)"
+    LIVE="$(printf '%s' "$TREE" | grep -oiE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')"
+    # the active/focused surface (the tab currently on screen)
+    ACTIVE_SF="$(printf '%s' "$TREE" | grep -i surface | grep -i active \
+                 | grep -oiE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)"
+    ;;
+esac
+
 # 1) Record this session's state.
 case "$1" in
   running)
@@ -179,10 +192,11 @@ case "$1" in
   done) printf 'done' > "$DIR/$SF" ;;
   ready)
     # ready is special: if this surface was just running (i.e. it "finished"),
-    # upgrade to done (finished-needs-review red dot). This way we don't depend
-    # on whether the Stop hook was mounted with ready or done — both old and new
-    # sessions produce the dot.
-    if [ "$(cat "$DIR/$SF" 2>/dev/null)" = "running" ]; then
+    # upgrade to done (the red "finished, unseen" dot) — UNLESS it's the tab you
+    # are currently viewing. If you're already looking at it, you've "seen" it,
+    # so go straight to ready with no dot; only backgrounded tabs get the dot.
+    if [ "$(cat "$DIR/$SF" 2>/dev/null)" = "running" ] \
+       && ! { [ -n "$ACTIVE_SF" ] && [ "$ACTIVE_SF" = "$SF" ]; }; then
       printf 'done' > "$DIR/$SF"
     else
       printf 'ready' > "$DIR/$SF"
@@ -191,20 +205,15 @@ case "$1" in
   *)     exit 0 ;;
 esac
 
-# 2) Clean up leftovers from closed surfaces (cmux tree is relatively heavy,
-# so only do this on low-frequency events).
-case "$1" in
-  ready|done|clear)
-    LIVE="$("$CMUX" tree --id-format both 2>/dev/null \
-            | grep -oiE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')"
-    if [ -n "$LIVE" ]; then
-      for f in "$DIR"/*; do
-        [ -e "$f" ] || continue
-        b="$(basename "$f")"
-        case "$LIVE" in *"$b"*) : ;; *) rm -f "$f" ;; esac
-      done
-    fi ;;
-esac
+# 2) Clean up leftovers from closed surfaces, using the tree read above
+# (cmux tree is relatively heavy, so only on the low-frequency ready|done|clear).
+if [ -n "$LIVE" ]; then
+  for f in "$DIR"/*; do
+    [ -e "$f" ] || continue
+    b="$(basename "$f")"
+    case "$LIVE" in *"$b"*) : ;; *) rm -f "$f" ;; esac
+  done
+fi
 
 # 3) Push this workspace.
 push_ws "$WS"
