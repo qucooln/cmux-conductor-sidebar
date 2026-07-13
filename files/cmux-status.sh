@@ -144,7 +144,10 @@ fi
 # and exited above).
 [ -n "$CMUX_WORKSPACE_ID" ] || exit 0
 WS="$CMUX_WORKSPACE_ID"
-SF="${CMUX_SURFACE_ID:-$WS}"
+# The surface (tab) id. Claude Code sets CMUX_SURFACE_ID; trae and newer cmux
+# builds only set CMUX_PANEL_ID (same value). Fall back so every agent registers
+# per-tab; last resort is the workspace id.
+SF="${CMUX_SURFACE_ID:-${CMUX_PANEL_ID:-$WS}}"
 DIR="$ROOT/$WS"
 mkdir -p "$DIR"
 
